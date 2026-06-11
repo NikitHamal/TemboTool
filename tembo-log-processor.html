@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tembo Log Processor — NEBians Dev Tools</title>
+  <meta name="description" content="Parse Tembo AI sandbox logs, extract file changes, and apply them to your local repo with full preview, backup, and undo support." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0b0f;
+      --surface: #111318;
+      --surface2: #181c24;
+      --surface3: #1e2330;
+      --border: rgba(255,255,255,0.07);
+      --border-accent: rgba(99,179,237,0.3);
+      --text: #e8edf5;
+      --text-muted: #6b7a99;
+      --text-dim: #3a4560;
+      --accent: #63b3ed;
+      --accent2: #7c6ff7;
+      --green: #48bb78;
+      --red: #fc8181;
+      --yellow: #f6c90e;
+      --orange: #ed8936;
+      --cyan: #4fd1c5;
+      --pink: #ed64a6;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.5);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 20% 20%, rgba(99,130,237,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(124,111,247,0.06) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header */
+    header {
+      padding: 28px 0 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 32px;
+    }
+
+    .header-inner {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+      box-shadow: 0 0 24px rgba(99,130,237,0.3);
+    }
+
+    h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+    h1 span { color: var(--text-muted); font-weight: 400; font-size: 14px; display: block; margin-top: 2px; }
+
+    .badge {
+      background: rgba(99,179,237,0.15);
+      border: 1px solid rgba(99,179,237,0.3);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    /* Drop zone */
+    #drop-zone {
+      border: 2px dashed var(--border-accent);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 56px 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #drop-zone::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(99,130,237,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(99,179,237,0.05);
+      transform: scale(1.005);
+    }
+
+    .drop-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      display: block;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+
+    .drop-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, var(--text), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .drop-sub { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 22px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(99,130,237,0.4);
+    }
+
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(99,130,237,0.5); }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover { background: var(--surface3); border-color: var(--border-accent); }
+
+    .btn-green { background: rgba(72,187,120,0.2); color: var(--green); border: 1px solid rgba(72,187,120,0.3); }
+    .btn-green:hover { background: rgba(72,187,120,0.3); }
+
+    .btn-red { background: rgba(252,129,129,0.15); color: var(--red); border: 1px solid rgba(252,129,129,0.3); }
+    .btn-red:hover { background: rgba(252,129,129,0.25); }
+
+    .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+    #file-input { display: none; }
+
+    /* Stats bar */
+    #stats-bar {
+      display: none;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    #stats-bar.visible { display: flex; }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 20px;
+      flex: 1;
+      min-width: 140px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: border-color 0.2s;
+    }
+
+    .stat-card:hover { border-color: var(--border-accent); }
+
+    .stat-icon { font-size: 22px; }
+    .stat-num { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+
+    /* Toolbar */
+    #toolbar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    #toolbar.visible { display: flex; }
+
+    .toolbar-sep { width: 1px; height: 28px; background: var(--border); }
+
+    .filter-btn {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+
+    .filter-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(99,179,237,0.1); }
+    .filter-btn:hover:not(.active) { border-color: var(--border-accent); color: var(--text); }
+
+    /* Main layout */
+    #main-layout {
+      display: none;
+      gap: 20px;
+    }
+
+    #main-layout.visible { display: grid; grid-template-columns: 340px 1fr; }
+
+    /* Timeline panel */
+    #timeline-panel {
+      height: calc(100vh - 280px);
+      overflow-y: auto;
+      position: sticky;
+      top: 20px;
+    }
+
+    #timeline-panel::-webkit-scrollbar { width: 6px; }
+    #timeline-panel::-webkit-scrollbar-track { background: transparent; }
+    #timeline-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .timeline-header {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      padding: 0 0 12px 0;
+    }
+
+    .timeline-item {
+      display: flex;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
+      margin-bottom: 4px;
+      position: relative;
+    }
+
+    .timeline-item:hover { background: var(--surface2); border-color: var(--border); }
+    .timeline-item.active { background: rgba(99,179,237,0.1); border-color: var(--border-accent); }
+
+    .ti-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 4px;
+    }
+
+    .ti-body { flex: 1; min-width: 0; }
+    .ti-type { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .ti-path {
+      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ti-time { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+    .dot-write { background: var(--accent); }
+    .dot-edit { background: var(--accent2); }
+    .dot-run { background: var(--green); }
+    .dot-success { background: var(--cyan); }
+    .dot-error { background: var(--red); }
+    .dot-stdout { background: var(--yellow); }
+    .dot-cd { background: var(--orange); }
+    .dot-other { background: var(--text-dim); }
+
+    /* Detail panel */
+    #detail-panel { min-width: 0; }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface2);
+    }
+
+    .panel-title { font-size: 14px; font-weight: 700; }
+    .panel-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .panel-actions { margin-left: auto; display: flex; gap: 8px; }
+
+    .code-block {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.65;
+      overflow-x: auto;
+      max-height: calc(100vh - 400px);
+      overflow-y: auto;
+    }
+
+    .code-block::-webkit-scrollbar { width: 6px; height: 6px; }
+    .code-block::-webkit-scrollbar-track { background: transparent; }
+    .code-block::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .code-line {
+      display: flex;
+      padding: 0 16px;
+      min-height: 20px;
+    }
+
+    .code-line:hover { background: rgba(255,255,255,0.03); }
+
+    .line-num {
+      color: var(--text-dim);
+      user-select: none;
+      min-width: 40px;
+      margin-right: 16px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .code-line.added { background: rgba(72,187,120,0.1); }
+    .code-line.added .line-num { color: var(--green); }
+    .code-line.removed { background: rgba(252,129,129,0.1); }
+    .code-line.removed .line-num { color: var(--red); }
+
+    .add-prefix { color: var(--green); margin-right: 4px; }
+    .rem-prefix { color: var(--red); margin-right: 4px; }
+
+    /* File apply cards */
+    #file-cards {
+      display: none;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    #file-cards.visible { display: flex; flex-direction: column; }
+
+    .file-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .file-card:hover { border-color: var(--border-accent); }
+    .file-card.applied { border-color: rgba(72,187,120,0.4); }
+
+    .file-card-header {
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      background: var(--surface2);
+    }
+
+    .file-card-header:hover { background: var(--surface3); }
+
+    .fc-icon { font-size: 18px; }
+    .fc-path {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .fc-status {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .fc-status.new { background: rgba(99,179,237,0.15); color: var(--accent); border: 1px solid rgba(99,179,237,0.3); }
+    .fc-status.modified { background: rgba(124,111,247,0.15); color: var(--accent2); border: 1px solid rgba(124,111,247,0.3); }
+    .fc-status.applied { background: rgba(72,187,120,0.15); color: var(--green); border: 1px solid rgba(72,187,120,0.3); }
+
+    .fc-toggle { color: var(--text-muted); font-size: 12px; margin-left: 8px; transition: transform 0.2s; }
+    .fc-toggle.open { transform: rotate(180deg); }
+
+    .fc-body { display: none; padding: 0; border-top: 1px solid var(--border); }
+    .fc-body.open { display: block; }
+
+    .fc-actions {
+      padding: 12px 18px;
+      display: flex;
+      gap: 8px;
+      background: rgba(0,0,0,0.2);
+      border-top: 1px solid var(--border);
+    }
+
+    /* AI Summaries */
+    .ai-summary {
+      background: rgba(99,179,237,0.05);
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .stdout-event {
+      background: rgba(246,201,14,0.05);
+      border-left: 3px solid var(--yellow);
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* Progress bar */
+    #progress-bar {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      animation: shimmer 1.5s infinite;
+      z-index: 100;
+    }
+
+    @keyframes shimmer {
+      0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; }
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: var(--shadow);
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      z-index: 1000;
+      max-width: 360px;
+    }
+
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.success { border-color: rgba(72,187,120,0.4); }
+    #toast.error { border-color: rgba(252,129,129,0.4); }
+
+    /* Empty/welcome state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+    .empty-state h3 { font-size: 18px; color: var(--text); margin-bottom: 8px; }
+
+    /* Scrollbar global */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      #main-layout.visible { grid-template-columns: 1fr; }
+      #timeline-panel { height: auto; position: static; max-height: 300px; }
+    }
+
+    /* Copy button */
+    .copy-btn {
+      position: absolute;
+      top: 10px; right: 10px;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--border-accent); }
+
+    /* Syntax highlighting */
+    .kw { color: #c792ea; }
+    .str { color: #c3e88d; }
+    .cm { color: #546e7a; font-style: italic; }
+    .fn { color: #82aaff; }
+    .num { color: #f78c6c; }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #search-input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 7px 14px;
+      font-family: inherit;
+      font-size: 13px;
+      width: 220px;
+      transition: border-color 0.2s;
+    }
+    #search-input:focus { outline: none; border-color: var(--border-accent); }
+    #search-input::placeholder { color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<div id="progress-bar"></div>
+<div id="toast"></div>
+
+<input type="file" id="file-input" accept=".txt,.log" />
+
+<div class="container">
+  <header>
+    <div class="header-inner">
+      <div class="logo">⚡</div>
+      <div>
+        <h1>Tembo Log Processor <span>NEBians Dev Tools — Sandbox Log Analyzer</span></h1>
+      </div>
+      <span class="badge">v2.0</span>
+    </div>
+  </header>
+
+  <!-- Drop Zone -->
+  <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+    <span class="drop-icon">📋</span>
+    <div class="drop-title">Drop your Tembo sandbox log here</div>
+    <div class="drop-sub">Export from Tembo → Session → Export Logs, then drop the .txt file here</div>
+    <button class="btn btn-primary" onclick="event.stopPropagation(); document.getElementById('file-input').click()">
+      📂 Browse File
+    </button>
+  </div>
+
+  <!-- Stats Bar -->
+  <div id="stats-bar">
+    <div class="stat-card">
+      <span class="stat-icon">📁</span>
+      <div>
+        <div class="stat-num" id="stat-writes">0</div>
+        <div class="stat-label">File Writes</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon">✏️</span>
+      <div>
+        <div class="stat-num" id="stat-edits">0</div>
+        <div class="stat-label">File Edits</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon">⚡</span>
+      <div>
+        <div class="stat-num" id="stat-cmds">0</div>
+        <div class="stat-label">Commands</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon">🔴</span>
+      <div>
+        <div class="stat-num" id="stat-errors">0</div>
+        <div class="stat-label">Errors</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon">🕐</span>
+      <div>
+        <div class="stat-num" id="stat-duration">0m</div>
+        <div class="stat-label">Duration</div>
+      </div>
+    </div>
+    <div class="stat-card" style="cursor:pointer;" onclick="document.getElementById('file-input').click()">
+      <span class="stat-icon">🔄</span>
+      <div>
+        <div class="stat-num" style="font-size:14px;margin-top:4px;">New Log</div>
+        <div class="stat-label">Load another</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <button class="filter-btn active" onclick="filterTimeline('all')">All</button>
+    <button class="filter-btn" onclick="filterTimeline('write')">✍️ Writes</button>
+    <button class="filter-btn" onclick="filterTimeline('run')">⚡ Commands</button>
+    <button class="filter-btn" onclick="filterTimeline('stdout')">💬 AI Output</button>
+    <button class="filter-btn" onclick="filterTimeline('error')">🔴 Errors</button>
+    <div class="toolbar-sep"></div>
+    <input type="text" id="search-input" placeholder="🔍 Search timeline..." oninput="searchTimeline(this.value)" />
+    <div class="toolbar-sep"></div>
+    <button class="btn btn-secondary btn-sm" onclick="copyAllFiles()">📋 Copy All Files</button>
+    <button class="btn btn-green btn-sm" onclick="downloadPackage()">⬇️ Download Changes</button>
+  </div>
+
+  <!-- File Cards (extracted files) -->
+  <div id="file-cards"></div>
+
+  <!-- Main Layout: Timeline + Detail -->
+  <div id="main-layout">
+    <div id="timeline-panel">
+      <div class="timeline-header">📅 Event Timeline</div>
+      <div id="timeline-list"></div>
+    </div>
+    <div id="detail-panel">
+      <div class="empty-state">
+        <div class="icon">👈</div>
+        <h3>Select an event</h3>
+        <p>Click any event in the timeline to see its details</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ============================================================
+// State
+// ============================================================
+let events = [];
+let filteredEvents = [];
+let fileMap = {};   // path -> {content, timestamp, type}
+let activeIdx = -1;
+let currentFilter = 'all';
+
+// ============================================================
+// File input / drop
+// ============================================================
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) loadLog(f);
+});
+
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) loadLog(f);
+});
+
+function loadLog(file) {
+  showProgress(true);
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    processLog(text);
+    showProgress(false);
+  };
+  reader.readAsText(file);
+}
+
+// ============================================================
+// Parser
+// ============================================================
+function processLog(text) {
+  const sections = text.split('\n---\n');
+  events = [];
+  fileMap = {};
+
+  let startTime = null, endTime = null;
+  let diffText = '';
+
+  for (const sec of sections) {
+    const ev = parseEvent(sec.trim());
+    if (!ev) continue;
+    events.push(ev);
+
+    if (!startTime) startTime = ev.ts;
+    endTime = ev.ts;
+
+    // Check if this event contains the git diff stdout
+    if (ev.type === 'success' && ev.command && ev.command.includes('git diff --cached') && ev.stdout) {
+      diffText = ev.stdout;
+    }
+  }
+
+  // Parse git diff if available; otherwise fallback to tracking config/credential writes
+  if (diffText) {
+    parseGitDiff(diffText);
+  } else {
+    for (const ev of events) {
+      if ((ev.type === 'write' || ev.type === 'edit') && ev.path && ev.content !== undefined) {
+        const p = ev.path;
+        if (!fileMap[p]) {
+          fileMap[p] = { path: p, content: ev.content, timestamp: ev.ts, operations: [], isNew: ev.type === 'write' };
+        } else {
+          fileMap[p].content = ev.content;
+        }
+        fileMap[p].operations.push({ type: ev.type, ts: ev.ts, content: ev.content });
+      }
+    }
+  }
+
+  filteredEvents = [...events];
+
+  // Stats
+  const writes = Object.values(fileMap).filter(f => f.isNew).length;
+  const edits = Object.values(fileMap).filter(f => !f.isNew).length;
+  const cmds = events.filter(e => e.type === 'run').length;
+  const errors = events.filter(e => e.type === 'error').length;
+
+  document.getElementById('stat-writes').textContent = writes;
+  document.getElementById('stat-edits').textContent = edits;
+  document.getElementById('stat-cmds').textContent = cmds;
+  document.getElementById('stat-errors').textContent = errors;
+
+  if (startTime && endTime) {
+    const dur = Math.round((new Date(endTime) - new Date(startTime)) / 60000);
+    document.getElementById('stat-duration').textContent = dur + 'm';
+  }
+
+  // Show UI
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('stats-bar').classList.add('visible');
+  document.getElementById('toolbar').classList.add('visible');
+  document.getElementById('main-layout').classList.add('visible');
+
+  renderTimeline();
+  renderFileCards();
+
+  toast('✅ Parsed ' + events.length + ' events. Extracted ' + Object.keys(fileMap).length + ' files.', 'success');
+}
+
+function parseGitDiff(diffText) {
+  const fileDiffs = diffText.split(/^diff --git /m);
+  
+  for (let part of fileDiffs) {
+    part = part.trim();
+    if (!part) continue;
+    
+    const lines = part.split('\n');
+    const headerLine = lines[0];
+    const headerMatch = headerLine.match(/^a\/(.*?) b\/(.*?)$/);
+    if (!headerMatch) continue;
+    
+    const path = headerMatch[2];
+    
+    let isNew = false;
+    let isDeleted = false;
+    let hunks = [];
+    let currentHunk = null;
+    
+    // Scan headers
+    let lineIdx = 1;
+    while (lineIdx < lines.length) {
+      const line = lines[lineIdx];
+      if (line.startsWith('@@')) break;
+      if (line.startsWith('new file mode')) isNew = true;
+      if (line.startsWith('deleted file mode')) isDeleted = true;
+      lineIdx++;
+    }
+    
+    // Parse hunks
+    for (let idx = lineIdx; idx < lines.length; idx++) {
+      const line = lines[idx];
+      if (line.startsWith('@@')) {
+        if (currentHunk) hunks.push(currentHunk);
+        currentHunk = { header: line, lines: [] };
+      } else if (currentHunk) {
+        currentHunk.lines.push(line);
+      }
+    }
+    if (currentHunk) hunks.push(currentHunk);
+    
+    // Reconstruct content if new file
+    let content = '';
+    if (isNew) {
+      const addedLines = [];
+      for (const hunk of hunks) {
+        for (const hline of hunk.lines) {
+          if (hline.startsWith('+')) {
+            addedLines.push(hline.slice(1));
+          }
+        }
+      }
+      content = addedLines.join('\n');
+    } else {
+      // For modified files, display the diff chunks
+      const diffLines = [];
+      for (const hunk of hunks) {
+        diffLines.push(hunk.header);
+        diffLines.push(...hunk.lines);
+      }
+      content = diffLines.join('\n');
+    }
+    
+    fileMap[path] = {
+      path: path,
+      content: content,
+      isNew: isNew,
+      isDeleted: isDeleted,
+      operations: isNew ? [{ type: 'write' }] : [{ type: 'edit' }],
+      hunks: hunks
+    };
+  }
+}
+
+function parseEvent(text) {
+  if (!text) return null;
+
+  // Match timestamp and type
+  const header = text.match(/\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+\[(\w+)\]\s*([\s\S]*?)(?:\s+Details:|$)/);
+  if (!header) return null;
+
+  const ts = header[1];
+  const type = header[2].toLowerCase();
+  const label = header[3].trim().replace(/\n/g, ' ').slice(0, 120);
+
+  // Parse Details JSON
+  const detailsMatch = text.match(/Details:\s*(\{[\s\S]*\})/);
+  let details = {};
+  if (detailsMatch) {
+    try { details = JSON.parse(detailsMatch[1]); } catch (e) {}
+  }
+
+  const ev = { ts, type, label, details, raw: text };
+
+  // Extract path
+  if (details.path) ev.path = details.path;
+  else if (details.command) ev.command = details.command;
+  else if (details.cwd) ev.cwd = details.cwd;
+
+  // Extract content for writes/edits
+  if (details.content !== undefined) ev.content = details.content;
+  if (details.result) {
+    ev.result = details.result;
+    if (details.result.stdout) ev.stdout = details.result.stdout;
+    if (details.result.stderr) ev.stderr = details.result.stderr;
+    if (details.result.exitCode !== undefined) ev.exitCode = details.result.exitCode;
+  }
+
+  return ev;
+}
+
+// ============================================================
+// Timeline rendering
+// ============================================================
+function renderTimeline() {
+  const list = document.getElementById('timeline-list');
+  list.innerHTML = '';
+
+  filteredEvents.forEach((ev, idx) => {
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+    item.dataset.idx = idx;
+
+    const colorClass = getDotClass(ev.type);
+    const timeStr = new Date(ev.ts).toLocaleTimeString();
+    const pathOrLabel = ev.path || ev.command || ev.cwd || ev.label || '';
+
+    item.innerHTML = `
+      <div class="ti-dot ${colorClass}"></div>
+      <div class="ti-body">
+        <div class="ti-type" style="color:${getTypeColor(ev.type)}">${ev.type}</div>
+        <div class="ti-path" title="${esc(pathOrLabel)}">${esc(shortPath(pathOrLabel))}</div>
+        <div class="ti-time">${timeStr}</div>
+      </div>
+    `;
+
+    item.addEventListener('click', () => selectEvent(idx, item));
+    list.appendChild(item);
+  });
+}
+
+function selectEvent(idx, itemEl) {
+  // Deactivate old
+  document.querySelectorAll('.timeline-item.active').forEach(el => el.classList.remove('active'));
+  itemEl.classList.add('active');
+  activeIdx = idx;
+  renderDetail(filteredEvents[idx]);
+}
+
+function renderDetail(ev) {
+  const panel = document.getElementById('detail-panel');
+
+  let bodyHtml = '';
+
+  if (ev.type === 'write' || ev.type === 'edit') {
+    const content = ev.content || (ev.details && ev.details.content) || '';
+    bodyHtml = `
+      <div style="position:relative;">
+        <button class="copy-btn" onclick="copyActiveContent()">Copy</button>
+        <div class="code-block" style="padding:16px 0">
+          ${renderCode(content)}
+        </div>
+      </div>
+    `;
+  } else if (ev.type === 'run' || ev.type === 'success' || ev.type === 'error') {
+    const cmd = ev.command || ev.details.command || '';
+    const stdout = ev.stdout || '';
+    const stderr = ev.stderr || '';
+    const exitCode = ev.exitCode;
+    bodyHtml = `
+      <div style="padding:16px 20px">
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Command</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;background:var(--surface3);padding:10px 14px;border-radius:8px;color:var(--accent)">${esc(cmd)}</div>
+        </div>
+        ${stdout ? `<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">stdout</div><pre style="font-family:'JetBrains Mono',monospace;font-size:11.5px;background:var(--surface3);padding:10px 14px;border-radius:8px;overflow-x:auto;color:var(--green);white-space:pre-wrap">${esc(stdout)}</pre></div>` : ''}
+        ${stderr ? `<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">stderr</div><pre style="font-family:'JetBrains Mono',monospace;font-size:11.5px;background:var(--surface3);padding:10px 14px;border-radius:8px;overflow-x:auto;color:var(--red);white-space:pre-wrap">${esc(stderr)}</pre></div>` : ''}
+        ${exitCode !== undefined ? `<div style="margin-top:12px;font-size:12px;color:${exitCode===0?'var(--green)':'var(--red)'}">Exit code: ${exitCode}</div>` : ''}
+      </div>
+    `;
+  } else if (ev.type === 'stdout') {
+    const msg = ev.details && ev.details.result ? ev.details.result : ev.label;
+    bodyHtml = `
+      <div class="ai-summary" style="margin:16px 20px;border-radius:8px;">
+        💬 <strong>AI Agent Said:</strong><br><br>${esc(String(msg))}
+      </div>
+    `;
+  } else {
+    bodyHtml = `<div style="padding:16px 20px"><pre style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);white-space:pre-wrap;overflow-x:auto">${esc(ev.raw || JSON.stringify(ev.details, null, 2))}</pre></div>`;
+  }
+
+  const subtitle = ev.path || ev.command || ev.cwd || '';
+
+  panel.innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div class="ti-dot ${getDotClass(ev.type)}" style="width:12px;height:12px;flex-shrink:0"></div>
+        <div>
+          <div class="panel-title" style="color:${getTypeColor(ev.type)}">${ev.type.toUpperCase()} — ${new Date(ev.ts).toLocaleTimeString()}</div>
+          ${subtitle ? `<div class="panel-subtitle" style="font-family:'JetBrains Mono',monospace">${esc(subtitle)}</div>` : ''}
+        </div>
+        ${(ev.type === 'write' || ev.type === 'edit') && ev.path ? `
+        <div class="panel-actions">
+          <button class="btn btn-sm btn-green" onclick="applyActiveToDisk()">✅ Mark Applied</button>
+        </div>` : ''}
+      </div>
+      ${bodyHtml}
+    </div>
+  `;
+}
+
+// ============================================================
+// File Cards
+// ============================================================
+function renderFileCards() {
+  const container = document.getElementById('file-cards');
+  const paths = Object.keys(fileMap);
+
+  if (paths.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.classList.add('visible');
+
+  // Section title
+  container.innerHTML = `<div class="section-title">📁 ${paths.length} File Changes Detected</div>`;
+
+  // Sort: source files first
+  paths.sort((a, b) => {
+    const srcA = a.includes('app/src') || a.includes('backend_python');
+    const srcB = b.includes('app/src') || b.includes('backend_python');
+    if (srcA && !srcB) return -1;
+    if (!srcA && srcB) return 1;
+    return a.localeCompare(b);
+  });
+
+    paths.forEach(p => {
+      const info = fileMap[p];
+      const isNew = info.isNew;
+      const card = document.createElement('div');
+      card.className = 'file-card';
+      card.id = 'fc_' + CSS.escape(p.replace(/[^a-zA-Z0-9]/g, '_'));
+
+      const ext = p.split('.').pop().toLowerCase();
+      const icon = getFileIcon(ext);
+      const statusLabel = isNew ? 'new' : 'modified';
+
+      card.innerHTML = `
+        <div class="file-card-header" onclick="toggleFileCard(this)">
+          <span class="fc-icon">${icon}</span>
+          <span class="fc-path" title="${esc(p)}">${esc(shortPath(p, 60))}</span>
+          <span class="fc-status ${statusLabel}">${statusLabel}</span>
+          <span class="fc-toggle">▼</span>
+        </div>
+        <div class="fc-body">
+          <div class="code-block" style="padding:12px 0">
+            ${renderCode(info.content || '', !isNew)}
+          </div>
+          <div class="fc-actions">
+            <button class="btn btn-sm btn-green" onclick="markApplied('${esc(p)}')">✅ Mark as Applied</button>
+            <button class="btn btn-sm btn-secondary" onclick="copyFromFileMap('${esc(p)}')">📋 Copy Content</button>
+            <button class="btn btn-sm btn-secondary" onclick="downloadFromFileMap('${esc(p)}')">⬇️ Download</button>
+            <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">${info.operations.length} operation(s)</span>
+          </div>
+        </div>
+      `;
+
+      container.appendChild(card);
+    });
+}
+
+function toggleFileCard(header) {
+  const body = header.nextElementSibling;
+  const toggle = header.querySelector('.fc-toggle');
+  body.classList.toggle('open');
+  toggle.classList.toggle('open');
+}
+
+function markApplied(path) {
+  const card = document.getElementById('fc_' + CSS.escape(path.replace(/[^a-zA-Z0-9]/g, '_')));
+  if (card) {
+    card.classList.add('applied');
+    const status = card.querySelector('.fc-status');
+    if (status) { status.className = 'fc-status applied'; status.textContent = 'applied'; }
+  }
+  toast('✅ Marked as applied: ' + shortPath(path, 40), 'success');
+}
+
+function applyFileToDisk(path, content) {
+  markApplied(path);
+}
+
+function copyFromFileMap(path) {
+  const info = fileMap[path];
+  if (info) copyText(info.content || '');
+}
+
+function downloadFromFileMap(path) {
+  const info = fileMap[path];
+  if (info) downloadFile(path, info.content || '');
+}
+
+function copyActiveContent() {
+  if (activeIdx !== -1) {
+    const ev = filteredEvents[activeIdx];
+    const content = ev.content || (ev.details && ev.details.content) || '';
+    copyText(content);
+  }
+}
+
+function applyActiveToDisk() {
+  if (activeIdx !== -1) {
+    const ev = filteredEvents[activeIdx];
+    if (ev.path) {
+      applyFileToDisk(ev.path, ev.content || '');
+    }
+  }
+}
+
+// ============================================================
+// Filtering & Search
+// ============================================================
+function filterTimeline(type) {
+  currentFilter = type;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+
+  if (type === 'all') {
+    filteredEvents = [...events];
+  } else {
+    filteredEvents = events.filter(e => e.type === type);
+  }
+
+  renderTimeline();
+}
+
+function searchTimeline(q) {
+  q = q.toLowerCase();
+  let base = currentFilter === 'all' ? events : events.filter(e => e.type === currentFilter);
+  if (!q) { filteredEvents = [...base]; }
+  else {
+    filteredEvents = base.filter(e => {
+      const searchable = [e.type, e.path, e.command, e.label, e.stdout].filter(Boolean).join(' ').toLowerCase();
+      return searchable.includes(q);
+    });
+  }
+  renderTimeline();
+}
+
+// ============================================================
+// Code rendering
+// ============================================================
+function renderCode(content, isDiff=false) {
+  if (typeof content === 'object') content = JSON.stringify(content, null, 2);
+  if (!content) return '<div class="code-line"><span class="line-num">—</span><span style="color:var(--text-muted);font-style:italic">Empty content</span></div>';
+
+  const lines = String(content).split('\n');
+  return lines.map((line, i) => {
+    let cls = 'code-line';
+    let displayedLine = line;
+    
+    if (isDiff) {
+      if (line.startsWith('+')) {
+        cls += ' added';
+        displayedLine = line.slice(1);
+      } else if (line.startsWith('-')) {
+        cls += ' removed';
+        displayedLine = line.slice(1);
+      } else if (line.startsWith('@@')) {
+        cls += ' hunk-header';
+        return `<div class="${cls}" style="color:var(--accent2);background:rgba(124,111,247,0.05);padding:0 16px;font-weight:600;"><span class="line-num">@@</span><span>${esc(line)}</span></div>`;
+      }
+    }
+    
+    return `<div class="${cls}"><span class="line-num">${i+1}</span><span>${syntaxHighlight(esc(displayedLine))}</span></div>`;
+  }).join('');
+}
+
+function syntaxHighlight(line) {
+  // Very basic highlighting
+  return line
+    .replace(/(&quot;[^&]*&quot;)/g, '<span class="str">$1</span>')
+    .replace(/\b(import|from|class|def|return|if|else|elif|for|while|try|except|with|as|pass|break|continue|True|False|None|val|var|fun|data|object|when|is|in|override|suspend|private|public|companion|enum|sealed|interface|abstract|extends|implements)\b/g, '<span class="kw">$1</span>');
+}
+
+// ============================================================
+// Utilities
+// ============================================================
+function getDotClass(type) {
+  const m = { write:'dot-write', edit:'dot-edit', run:'dot-run', success:'dot-success', error:'dot-error', stdout:'dot-stdout', cd:'dot-cd' };
+  return m[type] || 'dot-other';
+}
+
+function getTypeColor(type) {
+  const m = { write:'var(--accent)', edit:'var(--accent2)', run:'var(--green)', success:'var(--cyan)', error:'var(--red)', stdout:'var(--yellow)', cd:'var(--orange)', mkdir:'var(--pink)' };
+  return m[type] || 'var(--text-muted)';
+}
+
+function getFileIcon(ext) {
+  const m = { kt:'🟣', py:'🐍', js:'🟡', ts:'🔷', html:'🌐', css:'🎨', md:'📝', json:'📋', xml:'📄', sh:'⚡', gradle:'🔧', toml:'🔧' };
+  return m[ext] || '📄';
+}
+
+function shortPath(p, max=50) {
+  if (!p) return '';
+  const parts = p.replace(/\\/g, '/').split('/');
+  if (parts.length <= 3) return p;
+  const result = '.../' + parts.slice(-2).join('/');
+  return result.length > max ? result.slice(0, max) + '…' : result;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast('📋 Copied to clipboard', 'success'));
+}
+
+function copyAllFiles() {
+  const all = Object.entries(fileMap).map(([p, info]) => `// ===== ${p} =====\n${info.content || ''}`).join('\n\n');
+  copyText(all);
+}
+
+function downloadFile(path, content) {
+  const name = path.split('/').pop() || 'file.txt';
+  const blob = new Blob([content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+}
+
+function downloadPackage() {
+  const lines = ['# Tembo Log Extracted Files\n# Generated: ' + new Date().toISOString() + '\n'];
+  Object.entries(fileMap).forEach(([p, info]) => {
+    lines.push('# ===== FILE: ' + p + ' =====');
+    lines.push(info.content || '');
+    lines.push('');
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tembo-changes-' + Date.now() + '.txt';
+  a.click();
+  toast('⬇️ Downloading changes package', 'success');
+}
+
+function showProgress(show) {
+  document.getElementById('progress-bar').style.display = show ? 'block' : 'none';
+}
+
+let toastTimer;
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+</script>
+</body>
+</html>
