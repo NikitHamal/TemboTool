@@ -209,18 +209,21 @@ window.TemboTool = window.TemboTool || {};
         var content = info.content || '';
         lines.push('# File: ' + p);
         lines.push('$path = "' + p.replace(/"/g, '`"') + '"');
-        lines.push('$dir = Split-Path -Parent $path');
-        lines.push('if (!(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }');
-
-        lines.push('@\"');
-        lines.push(content);
-        lines.push('"@ | Out-File -FilePath $path -Encoding utf8 -Force');
-        lines.push('Write-Host "  Applied: $path"');
+        if (info.isDeleted) {
+          lines.push('if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force; Write-Host "  Deleted: $path" }');
+        } else {
+          lines.push('$dir = Split-Path -Parent $path');
+          lines.push('if (!(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }');
+          lines.push('@"');
+          lines.push(content);
+          lines.push('"@ | Out-File -FilePath $path -Encoding utf8 -Force');
+          lines.push('Write-Host "  Applied: $path"');
+        }
         lines.push('');
       }
 
       lines.push('Write-Host ""');
-      lines.push('Write-Host "All ' + paths.length + ' files applied successfully!" -ForegroundColor Green');
+      lines.push('Write-Host "All changes applied successfully!" -ForegroundColor Green');
 
       return lines.join('\n');
     }

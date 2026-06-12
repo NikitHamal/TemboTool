@@ -33,6 +33,40 @@ window.TemboTool = window.TemboTool || {};
     });
   }
 
+  function applyPatch(originalContent, hunks) {
+    if (!hunks || hunks.length === 0) return originalContent;
+    var normalizedContent = (originalContent || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    var fileLines = normalizedContent.split('\n');
+    var shift = 0;
+    for (var h = 0; h < hunks.length; h++) {
+      var hunk = hunks[h];
+      var match = hunk.header.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (!match) continue;
+      var oldStart = parseInt(match[1], 10);
+      var oldCount = match[2] !== undefined ? parseInt(match[2], 10) : 1;
+      var newStart = parseInt(match[3], 10);
+      var newCount = match[4] !== undefined ? parseInt(match[4], 10) : 1;
+
+      var targetIdx = Math.max(0, oldStart - 1) + shift;
+      var newLines = [];
+      for (var l = 0; l < hunk.lines.length; l++) {
+        var line = hunk.lines[l];
+        if (line.startsWith('+')) {
+          newLines.push(line.slice(1));
+        } else if (line.startsWith(' ')) {
+          newLines.push(line.slice(1));
+        } else if (line.startsWith('-')) {
+          // deleted line
+        } else if (line === '') {
+          newLines.push('');
+        }
+      }
+      fileLines.splice.apply(fileLines, [targetIdx, oldCount].concat(newLines));
+      shift += newCount - oldCount;
+    }
+    return fileLines.join('\n');
+  }
+
   tt.Analyzer = {
     analyzeRepo: async function(repoDirHandle, fileMap) {
       analysis = {};
@@ -48,24 +82,68 @@ window.TemboTool = window.TemboTool || {};
         var repoFile = await resolvePath(repoDirHandle, candidate);
 
         pathMapping[logPath] = repoFile || candidate;
+        var info = fileMap[logPath];
 
         if (repoFile) {
           var existing = await readRepoFile(repoDirHandle, repoFile);
-          var logContent = fileMap[logPath].content || '';
-          if (existing !== null) {
-            var diff = computeDiff(existing, logContent);
-            var hasChanges = diff.some(function(d) { return d.type !== 'same'; });
+          
+          if (info.isDeleted) {
+            info.content = '';
+            info.isPatched = true;
+            var diff = computeDiff(existing, '');
             analysis[logPath] = {
               resolvedPath: repoFile,
-              repoStatus: hasChanges ? 'modified' : 'up-to-date',
+              repoStatus: 'deleted',
               repoContent: existing,
-              logContent: logContent,
+              logContent: '',
               diff: diff,
               diffStats: countDiff(diff)
             };
           } else {
+            if (!info.isPatched && info.hunks && info.hunks.length > 0) {
+              info.content = applyPatch(existing, info.hunks);
+              info.isPatched = true;
+            }
+            var logContent = info.content || '';
+            if (existing !== null) {
+              var diff = computeDiff(existing, logContent);
+              var hasChanges = diff.some(function(d) { return d.type !== 'same'; });
+              analysis[logPath] = {
+                resolvedPath: repoFile,
+                repoStatus: hasChanges ? 'modified' : 'up-to-date',
+                repoContent: existing,
+                logContent: logContent,
+                diff: diff,
+                diffStats: countDiff(diff)
+              };
+            } else {
+              analysis[logPath] = {
+                resolvedPath: repoFile,
+                repoStatus: 'new',
+                repoContent: null,
+                logContent: logContent,
+                diff: null,
+                diffStats: { added: logContent.split('\n').length, removed: 0, same: 0 }
+              };
+            }
+          }
+        } else {
+          if (info.isDeleted) {
+            info.content = '';
+            info.isPatched = true;
             analysis[logPath] = {
-              resolvedPath: repoFile,
+              resolvedPath: candidate,
+              repoStatus: 'up-to-date',
+              repoContent: null,
+              logContent: '',
+              diff: null,
+              diffStats: { added: 0, removed: 0, same: 0 }
+            };
+          } else {
+            info.isPatched = true;
+            var logContent = info.content || '';
+            analysis[logPath] = {
+              resolvedPath: candidate,
               repoStatus: 'new',
               repoContent: null,
               logContent: logContent,
@@ -73,15 +151,6 @@ window.TemboTool = window.TemboTool || {};
               diffStats: { added: logContent.split('\n').length, removed: 0, same: 0 }
             };
           }
-        } else {
-          analysis[logPath] = {
-            resolvedPath: candidate,
-            repoStatus: 'new',
-            repoContent: null,
-            logContent: fileMap[logPath].content || '',
-            diff: null,
-            diffStats: { added: (fileMap[logPath].content || '').split('\n').length, removed: 0, same: 0 }
-          };
         }
       }
 

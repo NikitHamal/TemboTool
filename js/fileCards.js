@@ -24,22 +24,26 @@ window.TemboTool = window.TemboTool || {};
       var analysis = state.fileAnalysis || {};
       var modifiedCount = 0;
       var newCount = 0;
+      var deletedCount = 0;
       var upToDateCount = 0;
       var unresolvedCount = 0;
       for (var p in analysis) {
         var s = analysis[p].repoStatus;
         if (s === 'modified') modifiedCount++;
         else if (s === 'new') newCount++;
+        else if (s === 'deleted') deletedCount++;
         else if (s === 'up-to-date') upToDateCount++;
         else unresolvedCount++;
       }
 
       container.innerHTML =
         '<div class="section-title">\uD83D\uDCC1 ' + paths.length + ' File Changes' +
-        (repoConnected && modifiedCount + newCount > 0 ? ' <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:11px">' +
+        (repoConnected && modifiedCount + newCount + deletedCount > 0 ? ' <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:11px">' +
           (newCount > 0 ? newCount + ' new' : '') +
           (newCount > 0 && modifiedCount > 0 ? ', ' : '') +
           (modifiedCount > 0 ? modifiedCount + ' to update' : '') +
+          ((newCount > 0 || modifiedCount > 0) && deletedCount > 0 ? ', ' : '') +
+          (deletedCount > 0 ? deletedCount + ' to delete' : '') +
           (upToDateCount > 0 ? ', ' + upToDateCount + ' up-to-date' : '') +
           '</span>' : '') +
         '</div>' +
@@ -72,7 +76,7 @@ window.TemboTool = window.TemboTool || {};
       paths.sort(function(a, b) {
         var aStatus = analysis[a] ? analysis[a].repoStatus : '';
         var bStatus = analysis[b] ? analysis[b].repoStatus : '';
-        var order = { 'modified': 0, 'new': 1, 'up-to-date': 2, 'unresolved': 3 };
+        var order = { 'modified': 0, 'deleted': 0, 'new': 1, 'up-to-date': 2, 'unresolved': 3 };
         var aOrd = order[aStatus] !== undefined ? order[aStatus] : 99;
         var bOrd = order[bStatus] !== undefined ? order[bStatus] : 99;
         if (aOrd !== bOrd) return aOrd - bOrd;
@@ -93,9 +97,23 @@ window.TemboTool = window.TemboTool || {};
         var a = analysis[p];
         var repoStatus = a ? a.repoStatus : null;
 
-        var statusLabel = written ? 'written' : (marked ? 'marked' : (repoStatus || (isNew ? 'new' : 'modified')));
-        var statusClass = written ? 'applied' : (repoStatus === 'up-to-date' ? 'applied' : (isNew ? 'new' : 'modified'));
-        if (!written && !marked && repoStatus === 'up-to-date') statusClass = 'applied';
+        var statusLabel = repoStatus;
+        if (!statusLabel) {
+          if (info.isDeleted) statusLabel = 'deleted';
+          else if (isNew) statusLabel = 'new';
+          else statusLabel = 'modified';
+        }
+        if (written) statusLabel = 'written';
+        else if (marked) statusLabel = 'marked';
+
+        var statusClass = 'modified';
+        if (statusLabel === 'written' || statusLabel === 'marked' || statusLabel === 'up-to-date') {
+          statusClass = 'applied';
+        } else if (info.isDeleted) {
+          statusClass = 'deleted';
+        } else if (isNew) {
+          statusClass = 'new';
+        }
 
         var hasUndo = written || tt.Repo.hasBackup(p);
 
@@ -115,7 +133,7 @@ window.TemboTool = window.TemboTool || {};
           '<div class="fc-body">' +
             (analysisHtml ? '<div style="padding:12px 18px 0">' + analysisHtml + '</div>' : '') +
             '<div class="code-block" style="padding:12px 0">' +
-              tt.renderCode(info.content || '', written ? false : !isNew) +
+              tt.renderCode(info.content || '', (written || info.isPatched) ? false : !isNew) +
             '</div>' +
             '<div class="fc-actions">' +
               '<button class="btn btn-sm ' + (written ? 'btn-secondary' : 'btn-green') + '" onclick="TemboTool.FileCards.applyFile(\'' + tt.esc(p) + '\')">' +
@@ -152,7 +170,12 @@ window.TemboTool = window.TemboTool || {};
       var resolvedPath = (state.pathMapping && state.pathMapping[path]) || path;
 
       tt.showProgress(true);
-      var success = await tt.Repo.writeFile(resolvedPath, info.content || '');
+      var success;
+      if (info.isDeleted) {
+        success = await tt.Repo.deleteFile(resolvedPath);
+      } else {
+        success = await tt.Repo.writeFile(resolvedPath, info.content || '');
+      }
       tt.showProgress(false);
 
       if (success) {
@@ -162,7 +185,7 @@ window.TemboTool = window.TemboTool || {};
           await tt.Analyzer.analyzeRepo(tt.Repo.getHandle(), state.fileMap);
         }
         tt.FileCards.render(state.fileMap);
-        tt.toast('Written to disk: ' + tt.shortPath(path, 40), 'success');
+        tt.toast((info.isDeleted ? 'Deleted: ' : 'Written to disk: ') + tt.shortPath(path, 40), 'success');
       }
     },
 
@@ -214,7 +237,12 @@ window.TemboTool = window.TemboTool || {};
         for (var i = 0; i < paths.length; i++) {
           var resolvedPath = (state.pathMapping && state.pathMapping[paths[i]]) || paths[i];
           var info = state.fileMap[paths[i]];
-          var ok = await tt.Repo.writeFile(resolvedPath, info.content || '');
+          var ok;
+          if (info.isDeleted) {
+            ok = await tt.Repo.deleteFile(resolvedPath);
+          } else {
+            ok = await tt.Repo.writeFile(resolvedPath, info.content || '');
+          }
           if (ok) {
             tt.State.markApplied(paths[i]);
             tt.State.markWritten(paths[i]);
@@ -248,7 +276,7 @@ window.TemboTool = window.TemboTool || {};
 
       var toWrite = paths.filter(function(p) {
         var a = analysis[p];
-        return !a || a.repoStatus === 'modified' || a.repoStatus === 'new';
+        return !a || a.repoStatus === 'modified' || a.repoStatus === 'new' || a.repoStatus === 'deleted';
       });
 
       if (toWrite.length === 0) {
@@ -262,7 +290,12 @@ window.TemboTool = window.TemboTool || {};
         var p = toWrite[i];
         var resolvedPath = (state.pathMapping && state.pathMapping[p]) || p;
         var info = state.fileMap[p];
-        var ok = await tt.Repo.writeFile(resolvedPath, info.content || '');
+        var ok;
+        if (info.isDeleted) {
+          ok = await tt.Repo.deleteFile(resolvedPath);
+        } else {
+          ok = await tt.Repo.writeFile(resolvedPath, info.content || '');
+        }
         if (ok) {
           tt.State.markApplied(p);
           tt.State.markWritten(p);
